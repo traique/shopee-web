@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeToken, tokenFromPath, tokenMatches } from "../src/auth.js";
+import { normalizeToken, tokenFromPath, tokenFromVersionPath, tokenMatches } from "../src/auth.js";
 
 test("normalizes surrounding whitespace only", () => {
   assert.equal(normalizeToken("  abc  "), "abc");
@@ -19,4 +19,12 @@ test("extracts exactly one encoded token path segment", () => {
   assert.equal(tokenFromPath("/cdp/abc/extra"), "");
   assert.equal(tokenFromPath("/healthz"), "");
   assert.equal(tokenFromPath("/cdp/"), "");
+});
+
+
+test("tokenFromVersionPath parses Playwright CDP discovery paths", () => {
+  assert.equal(tokenFromVersionPath("/cdp/secret/json/version"), "secret");
+  assert.equal(tokenFromVersionPath("/cdp/secret/json/version/"), "secret");
+  assert.equal(tokenFromVersionPath("/cdp/secret/json/list"), "");
+  assert.equal(tokenFromVersionPath("/cdp/secret/other/json/version/"), "");
 });
