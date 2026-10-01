@@ -1,6 +1,6 @@
 {
   "name": "shopee-chromium-cdp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Small authenticated Chromium CDP bridge for a Shopee automation client.",
   "type": "module",

@@ -14,7 +14,7 @@ SHOPEE_BROWSER_CDP_URL
 lananh (Render Free 512 MB)
   Playwright connect_over_cdp(...)
               |
-              | WSS
+              | HTTPS discovery → WSS
               v
 shopee-chromium-cdp (Render Free 512 MB)
   Node proxy (~nhẹ)
@@ -63,13 +63,13 @@ Response bình thường:
 Trong Render service của `lananh`, chỉ đặt:
 
 ```text
-SHOPEE_BROWSER_CDP_URL=wss://<service>.onrender.com/cdp/<CDP_TOKEN>
+SHOPEE_BROWSER_CDP_URL=https://<service>.onrender.com/cdp/<CDP_TOKEN>
 ```
 
 Ví dụ:
 
 ```text
-SHOPEE_BROWSER_CDP_URL=wss://shopee-chromium-cdp.onrender.com/cdp/0123456789abcdef...
+SHOPEE_BROWSER_CDP_URL=https://shopee-chromium-cdp.onrender.com/cdp/0123456789abcdef...
 ```
 
 Không cần đổi `services/shopee_affiliate_browser.py`. Code hiện tại của `lananh` đã ưu tiên `SHOPEE_BROWSER_CDP_URL` và gọi:
@@ -82,7 +82,7 @@ await playwright.chromium.connect_over_cdp(config.SHOPEE_BROWSER_CDP_URL)
 
 ## Lưu ý bảo mật
 
-CDP có quyền điều khiển toàn bộ browser. Worker vì vậy không mở `/json/version` hay port 9222 ra Internet; public WebSocket chỉ hoạt động ở đường dẫn `/cdp/<CDP_TOKEN>`.
+CDP có quyền điều khiển toàn bộ browser. Port 9222 vẫn chỉ bind `127.0.0.1`. Worker chỉ public hai route có token: HTTP discovery `/cdp/<CDP_TOKEN>/json/version[/]` và WebSocket `/cdp/<CDP_TOKEN>`. Discovery rewrite `webSocketDebuggerUrl` về WebSocket public, nên không làm lộ `127.0.0.1:9222`.
 
 **Quan trọng:** source `lananh` hiện log nguyên `SHOPEE_BROWSER_CDP_URL` khi kết nối browser ngoài. Vì yêu cầu là giữ repo `lananh` hoàn toàn nguyên trạng, token nằm trong URL cũng có thể xuất hiện trong Render logs của `lananh`. Không chia sẻ log đó công khai. Muốn loại bỏ rủi ro này hoàn toàn cần một thay đổi nhỏ bên `lananh` để redact URL trước khi log, nhưng thay đổi đó không nằm trong repo này.
 
@@ -126,6 +126,7 @@ docker run --rm -p 10000:10000 \
 ## Health vs CDP
 
 - `GET /healthz`: health/metric nhẹ, không tự mở Chromium.
-- `wss://host/cdp/<token>`: CDP bridge, mở Chromium nếu chưa chạy.
+- `GET /cdp/<token>/json/version[/]`: Playwright CDP discovery, mở Chromium nếu chưa chạy.
+- `wss://host/cdp/<token>`: CDP bridge sau discovery.
 - endpoint khác: `404`.
 - client CDP thứ hai trong lúc đang xử lý: `429`.
