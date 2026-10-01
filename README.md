@@ -8,6 +8,13 @@ Repo này **không chứa code Telegram, Facebook, Shopee session, DB hay busine
 SHOPEE_BROWSER_CDP_URL
 ```
 
+## Shopee SPA trắng dù URL đúng
+
+Nếu log phía `lananh` cho thấy URL vẫn là `/offer/custom_link` nhưng `title`, `bodyTextSnippet` và `buttons` đều rỗng, worker từ v1.0.2 dùng bộ Chromium flags bám sát Playwright 1.63 thay vì các flags ép RAM trước đây. Các flags `--renderer-process-limit=1`, giới hạn V8 192 MB, `--disable-software-rasterizer`, `--disable-gpu` và `imagesEnabled=false` đã được bỏ vì có thể làm CDP attach/SPA hoạt động không đúng.
+
+Với worker riêng 512 MB, ưu tiên correctness của Chromium trước; concurrency vẫn bị khóa ở 1 CDP client để kiểm soát RAM.
+
+
 ## Kiến trúc
 
 ```text

@@ -8,7 +8,5 @@ services:
     envVars:
       - key: CDP_TOKEN
         sync: false
-      - key: CHROME_JS_HEAP_MB
-        value: "192"
       - key: CHROME_START_TIMEOUT_MS
         value: "30000"
