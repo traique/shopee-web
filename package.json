@@ -1,0 +1,17 @@
+{
+  "name": "shopee-chromium-cdp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Small authenticated Chromium CDP bridge for a Shopee automation client.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  }
+}
