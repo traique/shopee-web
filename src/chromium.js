@@ -142,6 +142,12 @@ export async function ensureChromiumReady() {
   return startingPromise;
 }
 
+
+export async function chromiumVersion() {
+  await ensureChromiumReady();
+  return getJson("/json/version");
+}
+
 export function chromiumStatus() {
   return {
     running: Boolean(chromeProcess && chromeProcess.exitCode === null),

@@ -13,12 +13,7 @@ export function tokenMatches(expected, actual) {
   return crypto.timingSafeEqual(left, right);
 }
 
-export function tokenFromPath(pathname) {
-  const prefix = "/cdp/";
-  if (!pathname.startsWith(prefix)) {
-    return "";
-  }
-  const encoded = pathname.slice(prefix.length);
+function decodeTokenSegment(encoded) {
   if (!encoded || encoded.includes("/")) {
     return "";
   }
@@ -27,4 +22,26 @@ export function tokenFromPath(pathname) {
   } catch {
     return "";
   }
+}
+
+export function tokenFromPath(pathname) {
+  const prefix = "/cdp/";
+  if (!pathname.startsWith(prefix)) {
+    return "";
+  }
+  return decodeTokenSegment(pathname.slice(prefix.length));
+}
+
+export function tokenFromVersionPath(pathname) {
+  const prefix = "/cdp/";
+  const suffixes = ["/json/version", "/json/version/"];
+  if (!pathname.startsWith(prefix)) {
+    return "";
+  }
+  for (const suffix of suffixes) {
+    if (pathname.endsWith(suffix)) {
+      return decodeTokenSegment(pathname.slice(prefix.length, -suffix.length));
+    }
+  }
+  return "";
 }

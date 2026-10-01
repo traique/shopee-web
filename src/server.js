@@ -2,8 +2,8 @@ import http from "node:http";
 import process from "node:process";
 import { WebSocket, WebSocketServer } from "ws";
 
-import { tokenFromPath, tokenMatches } from "./auth.js";
-import { chromiumStatus, ensureChromiumReady, stopChromium } from "./chromium.js";
+import { tokenFromPath, tokenFromVersionPath, tokenMatches } from "./auth.js";
+import { chromiumStatus, chromiumVersion, ensureChromiumReady, stopChromium } from "./chromium.js";
 import { memorySnapshot } from "./memory.js";
 
 const PORT = Number.parseInt(process.env.PORT || "10000", 10);
@@ -26,6 +26,17 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
+function publicCdpWebSocketUrl(request) {
+  const forwardedProto = String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const forwardedHost = String(request.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  const host = forwardedHost || String(request.headers.host || "").trim();
+  if (!host || /[\s/]/.test(host)) {
+    throw new Error("Invalid public host header");
+  }
+  const scheme = forwardedProto === "https" ? "wss" : "ws";
+  return `${scheme}://${host}/cdp/${encodeURIComponent(CDP_TOKEN)}`;
+}
+
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || "/", "http://localhost");
   if (request.method === "GET" && url.pathname === "/healthz") {
@@ -37,6 +48,32 @@ const server = http.createServer(async (request, response) => {
     });
     return;
   }
+
+  if (request.method === "GET") {
+    const suppliedToken = tokenFromVersionPath(url.pathname);
+    if (suppliedToken) {
+      if (!tokenMatches(CDP_TOKEN, suppliedToken)) {
+        sendJson(response, 404, { error: "not_found" });
+        return;
+      }
+      if (activeClient) {
+        sendJson(response, 429, { error: "browser_busy" });
+        return;
+      }
+      try {
+        const version = await chromiumVersion();
+        sendJson(response, 200, {
+          ...version,
+          webSocketDebuggerUrl: publicCdpWebSocketUrl(request),
+        });
+      } catch (error) {
+        console.error(`[cdp] discovery failed: ${error.message}`);
+        sendJson(response, 503, { error: "browser_unavailable" });
+      }
+      return;
+    }
+  }
+
   sendJson(response, 404, { error: "not_found" });
 });
 
