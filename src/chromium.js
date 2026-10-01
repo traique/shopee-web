@@ -7,39 +7,86 @@ const CHROME_PORT = Number.parseInt(process.env.CHROME_DEBUG_PORT || "9222", 10)
 const CHROME_EXECUTABLE = process.env.CHROME_EXECUTABLE || "/usr/bin/chromium";
 const PROFILE_DIR = process.env.CHROME_PROFILE_DIR || "/tmp/shopee-cdp-profile";
 const START_TIMEOUT_MS = Number.parseInt(process.env.CHROME_START_TIMEOUT_MS || "30000", 10);
-const JS_HEAP_MB = Number.parseInt(process.env.CHROME_JS_HEAP_MB || "192", 10);
 
 let chromeProcess = null;
 let startingPromise = null;
 let lastExit = null;
 
 function chromeArgs() {
+  // Keep this list aligned with Playwright 1.63 Chromium defaults.
+  // connect_over_cdp() is lower fidelity than the Playwright protocol and
+  // Playwright explicitly warns that custom launch arguments may break
+  // functionality. The previous RAM-oriented flags (renderer-process-limit,
+  // tiny V8 heap, disabled software rasterizer/images) produced a Shopee SPA
+  // shell with scripts present but an empty body.
+  const disabledFeatures = [
+    "AcceptCHFrame",
+    "AvoidUnnecessaryBeforeUnloadCheckSync",
+    "DestroyProfileOnBrowserClose",
+    "DialMediaRouteProvider",
+    "GlobalMediaControls",
+    "HttpsUpgrades",
+    "LensOverlay",
+    "MediaRouter",
+    "PaintHolding",
+    "ThirdPartyStoragePartitioning",
+    "Translate",
+    "AutoDeElevate",
+    "RenderDocument",
+    "OptimizationHints",
+  ].join(",");
+
   return [
-    "--headless=new",
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-gpu",
-    "--disable-extensions",
+    "--disable-field-trial-config",
     "--disable-background-networking",
-    "--disable-sync",
-    "--metrics-recording-only",
-    "--mute-audio",
-    "--no-first-run",
-    "--disable-default-apps",
-    "--disable-software-rasterizer",
     "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-back-forward-cache",
+    "--disable-breakpad",
+    "--disable-client-side-phishing-detection",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-component-update",
+    "--no-default-browser-check",
+    "--disable-default-apps",
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+    `--disable-features=${disabledFeatures}`,
+    "--enable-features=CDPScreenshotNewSurface",
+    "--allow-pre-commit-input",
+    "--disable-hang-monitor",
+    "--disable-ipc-flooding-protection",
+    "--disable-popup-blocking",
+    "--disable-prompt-on-repost",
     "--disable-renderer-backgrounding",
-    "--blink-settings=imagesEnabled=false",
-    "--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints",
-    "--renderer-process-limit=1",
-    `--js-flags=--max-old-space-size=${JS_HEAP_MB}`,
+    "--force-color-profile=srgb",
+    "--metrics-recording-only",
+    "--no-first-run",
+    "--password-store=basic",
+    "--use-mock-keychain",
+    "--no-service-autorun",
+    "--export-tagged-pdf",
+    "--disable-search-engine-choice-screen",
+    "--unsafely-disable-devtools-self-xss-warnings",
+    "--edge-skip-compat-layer-relaunch",
+    "--enable-automation",
+    "--disable-infobars",
+    "--disable-sync",
+    "--headless",
+    "--hide-scrollbars",
+    "--mute-audio",
+    "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+    "--no-sandbox",
     `--remote-debugging-address=${CHROME_HOST}`,
     `--remote-debugging-port=${CHROME_PORT}`,
     `--user-data-dir=${PROFILE_DIR}`,
-    "about:blank"
+    "--no-startup-window",
   ];
 }
+
+export function chromiumLaunchArgsForTest() {
+  return chromeArgs();
+}
+
 
 function getJson(pathname, timeoutMs = 1500) {
   return new Promise((resolve, reject) => {
