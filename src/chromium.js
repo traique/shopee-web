@@ -11,6 +11,12 @@ const START_TIMEOUT_MS = Number.parseInt(process.env.CHROME_START_TIMEOUT_MS || 
 let chromeProcess = null;
 let startingPromise = null;
 let lastExit = null;
+let lifecycle = Promise.resolve();
+function serializeLifecycle(work) {
+  const job = lifecycle.then(work);
+  lifecycle = job.catch(() => undefined);
+  return job;
+}
 
 function chromeArgs() {
   // Keep this list aligned with Playwright 1.63 Chromium defaults.
@@ -141,10 +147,11 @@ async function waitUntilReady() {
 
 async function launchChromium() {
   await fs.rm(PROFILE_DIR, { recursive: true, force: true });
-  chromeProcess = spawn(CHROME_EXECUTABLE, chromeArgs(), {
+  const child = spawn(CHROME_EXECUTABLE, chromeArgs(), {
     stdio: ["ignore", "ignore", "pipe"],
     env: { ...process.env, HOME: "/tmp" },
   });
+  chromeProcess = child;
   lastExit = null;
   let stderrTail = "";
   chromeProcess.stderr.setEncoding("utf8");
@@ -153,7 +160,7 @@ async function launchChromium() {
   });
   chromeProcess.once("exit", (code, signal) => {
     lastExit = `code=${code ?? "null"}, signal=${signal ?? "null"}`;
-    chromeProcess = null;
+    if (chromeProcess === child) chromeProcess = null;
     if (code && stderrTail) {
       console.error(`[chromium] exited ${lastExit}: ${stderrTail.replace(/\s+/g, " ").trim()}`);
     } else {
@@ -161,6 +168,8 @@ async function launchChromium() {
     }
   });
   chromeProcess.once("error", (error) => {
+    lastExit = "spawn failed";
+    if (chromeProcess === child) chromeProcess = null;
     console.error(`[chromium] spawn failed: ${error.message}`);
   });
 
@@ -170,25 +179,21 @@ async function launchChromium() {
 }
 
 export async function ensureChromiumReady() {
-  if (chromeProcess && chromeProcess.exitCode === null) {
-    try {
-      const version = await getJson("/json/version");
-      if (version.webSocketDebuggerUrl) {
-        return version.webSocketDebuggerUrl;
-      }
-    } catch {
-      // Fall through and restart the process if DevTools stopped responding.
-    }
-  }
-
   if (!startingPromise) {
-    startingPromise = launchChromium().finally(() => {
-      startingPromise = null;
-    });
+    startingPromise = serializeLifecycle(async () => {
+      if (chromeProcess && chromeProcess.exitCode === null && chromeProcess.signalCode === null) {
+        try {
+          const version = await getJson("/json/version");
+          if (version.webSocketDebuggerUrl) return version.webSocketDebuggerUrl;
+        } catch { /* Restart only after the previous process has exited. */ }
+      }
+      await stopUnlocked();
+      try { return await launchChromium(); }
+      catch (error) { await stopUnlocked(); throw error; }
+    }).finally(() => { startingPromise = null; });
   }
   return startingPromise;
 }
-
 
 export async function chromiumVersion() {
   await ensureChromiumReady();
@@ -203,17 +208,23 @@ export function chromiumStatus() {
   };
 }
 
-export async function stopChromium() {
-  const processToStop = chromeProcess;
-  if (!processToStop || processToStop.exitCode !== null) {
-    return;
-  }
-  processToStop.kill("SIGTERM");
-  await Promise.race([
-    new Promise((resolve) => processToStop.once("exit", resolve)),
-    new Promise((resolve) => setTimeout(resolve, 5000)),
-  ]);
-  if (processToStop.exitCode === null) {
-    processToStop.kill("SIGKILL");
+async function stopUnlocked() {
+  const child = chromeProcess;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise(resolve => child.once("exit", resolve));
+  child.kill("SIGTERM");
+  let timer;
+  try {
+    await Promise.race([exited, new Promise(resolve => { timer = setTimeout(resolve, 5000); })]);
+  } finally { clearTimeout(timer); }
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+    try {
+      await Promise.race([exited, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Previous Chromium did not exit")), 2000);
+      })]);
+    } finally { clearTimeout(timer); }
   }
 }
+
+export function stopChromium() { return serializeLifecycle(stopUnlocked); }

@@ -17,6 +17,24 @@ if (CDP_TOKEN.length < 32 || CDP_TOKEN.length > MAX_TOKEN_LENGTH) {
 }
 
 let activeClient = false;
+let activeConnection = null;
+let idleTimer = null;
+const IDLE_MS = Math.max(5000, Number.parseInt(process.env.CHROME_IDLE_TIMEOUT_MS || "30000", 10) || 30000);
+const MAX_CDP_BYTES = 16 * 1024 * 1024;
+function cancelIdleStop() { clearTimeout(idleTimer); idleTimer = null; }
+function scheduleIdleStop() {
+  cancelIdleStop();
+  idleTimer = setTimeout(() => {
+    if (!activeClient) void stopChromium().catch(error => console.error(`[chromium] idle stop failed: ${error.message}`));
+  }, IDLE_MS);
+  idleTimer.unref();
+}
+function releaseClient(connection) {
+  if (activeConnection !== connection) return;
+  activeConnection = null;
+  activeClient = false;
+  scheduleIdleStop();
+}
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -61,7 +79,9 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       try {
+        cancelIdleStop();
         const version = await chromiumVersion();
+        scheduleIdleStop();
         sendJson(response, 200, {
           ...version,
           webSocketDebuggerUrl: publicCdpWebSocketUrl(request),
@@ -80,7 +100,7 @@ const server = http.createServer(async (request, response) => {
 const wss = new WebSocketServer({
   noServer: true,
   perMessageDeflate: false,
-  maxPayload: 100 * 1024 * 1024,
+  maxPayload: MAX_CDP_BYTES,
 });
 
 function rejectUpgrade(socket, statusCode, statusText) {
@@ -104,11 +124,13 @@ function bridge(external, internal) {
 
   external.on("message", (data, isBinary) => {
     if (internal.readyState === WebSocket.OPEN) {
+      if (internal.bufferedAmount + data.length > MAX_CDP_BYTES) { external.terminate(); internal.terminate(); return; }
       internal.send(data, { binary: isBinary });
     }
   });
   internal.on("message", (data, isBinary) => {
     if (external.readyState === WebSocket.OPEN) {
+      if (external.bufferedAmount + data.length > MAX_CDP_BYTES) { external.terminate(); internal.terminate(); return; }
       external.send(data, { binary: isBinary });
     }
   });
@@ -132,12 +154,26 @@ server.on("upgrade", async (request, socket, head) => {
   }
 
   activeClient = true;
+  const connection = {};
+  activeConnection = connection;
+  cancelIdleStop();
   let internal = null;
+  const disconnectedDuringSetup = () => {
+    releaseClient(connection);
+    internal?.terminate();
+    socket.destroy();
+  };
+  socket.once("close", disconnectedDuringSetup);
+  socket.once("end", disconnectedDuringSetup);
+  socket.once("error", disconnectedDuringSetup);
+  // Upgrade sockets are paused by HTTP; read FIN while Chromium is starting.
+  socket.resume();
   try {
     const chromeWsUrl = await ensureChromiumReady();
+    if (socket.destroyed || activeConnection !== connection) return;
     internal = new WebSocket(chromeWsUrl, {
       perMessageDeflate: false,
-      maxPayload: 100 * 1024 * 1024,
+      maxPayload: MAX_CDP_BYTES,
       handshakeTimeout: 10000,
     });
     await new Promise((resolve, reject) => {
@@ -146,11 +182,14 @@ server.on("upgrade", async (request, socket, head) => {
     });
 
     wss.handleUpgrade(request, socket, head, (external) => {
+      socket.off("close", disconnectedDuringSetup);
+      socket.off("end", disconnectedDuringSetup);
+      socket.off("error", disconnectedDuringSetup);
       const started = Date.now();
       console.log("[cdp] client connected");
       bridge(external, internal);
       external.once("close", async () => {
-        activeClient = false;
+        releaseClient(connection);
         const memory = await memorySnapshot();
         console.log(
           `[cdp] client disconnected after ${Math.round((Date.now() - started) / 1000)}s; `
@@ -159,7 +198,10 @@ server.on("upgrade", async (request, socket, head) => {
       });
     });
   } catch (error) {
-    activeClient = false;
+    socket.off("close", disconnectedDuringSetup);
+    socket.off("end", disconnectedDuringSetup);
+    socket.off("error", disconnectedDuringSetup);
+    releaseClient(connection);
     internal?.terminate();
     console.error(`[cdp] connection setup failed: ${error.message}`);
     rejectUpgrade(socket, 503, "Service Unavailable");
@@ -168,6 +210,7 @@ server.on("upgrade", async (request, socket, head) => {
 
 async function shutdown(signal) {
   console.log(`[server] received ${signal}; shutting down`);
+  cancelIdleStop();
   server.close();
   wss.close();
   await stopChromium();
