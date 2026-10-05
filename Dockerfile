@@ -9,8 +9,8 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 COPY src ./src
 
@@ -18,4 +18,4 @@ USER node
 
 EXPOSE 10000
 
-CMD ["node", "src/server.js"]
+CMD ["node", "--max-old-space-size=64", "--max-semi-space-size=8", "src/server.js"]

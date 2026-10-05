@@ -10,3 +10,5 @@ services:
         sync: false
       - key: CHROME_START_TIMEOUT_MS
         value: "30000"
+      - key: CHROME_IDLE_TIMEOUT_MS
+        value: "30000"

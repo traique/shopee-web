@@ -137,3 +137,11 @@ docker run --rm -p 10000:10000 \
 - `wss://host/cdp/<token>`: CDP bridge sau discovery.
 - endpoint khác: `404`.
 - client CDP thứ hai trong lúc đang xử lý: `429`.
+
+## Render 512 MB lifecycle update
+
+Chromium stops after 30 seconds without a CDP client (`CHROME_IDLE_TIMEOUT_MS`). HTTP health checks do not launch it. Start/stop operations are serialized, and an aborted upgrade releases its client slot during cold start. CDP frames and pending proxy buffers are capped at 16 MiB. Node uses old-space 64 MiB and semi-space 8 MiB in Docker; buffers and Chromium RSS are separate from this heap cap.
+
+The worker still uses the original Chromium flags and temporary profile. The bot must restore its encrypted Shopee storage state into its own context. These changes do not establish that Shopee accepts Render traffic.
+
+Run `npm ci && npm test` to check authentication and lifecycle using a fake Chromium process. Tests do not contact Shopee.
